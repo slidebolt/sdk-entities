@@ -28,6 +28,22 @@ type Event struct {
 	Cause            string   `json:"cause,omitempty"`
 }
 
+func init() {
+	types.RegisterDomain(Describe())
+}
+
+func Describe() types.DomainDescriptor {
+	actions := []types.ActionDescriptor{
+		{Action: ActionTurnOn},
+		{Action: ActionTurnOff},
+	}
+	return types.DomainDescriptor{
+		Domain:   Type,
+		Commands: actions,
+		Events:   actions,
+	}
+}
+
 func SupportedActions() []string {
 	return []string{ActionTurnOn, ActionTurnOff}
 }

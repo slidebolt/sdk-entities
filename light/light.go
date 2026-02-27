@@ -44,6 +44,34 @@ type Event struct {
 	Cause            string   `json:"cause,omitempty"`
 }
 
+func init() {
+	types.RegisterDomain(Describe())
+}
+
+func Describe() types.DomainDescriptor {
+	brightness := []types.FieldDescriptor{{Name: "brightness", Type: "int", Required: true, Min: intPtr(0), Max: intPtr(100)}}
+	rgb := []types.FieldDescriptor{{Name: "rgb", Type: "[]int", Required: true}}
+	temperature := []types.FieldDescriptor{{Name: "temperature", Type: "int", Required: true}}
+	scene := []types.FieldDescriptor{{Name: "scene", Type: "string", Required: true}}
+
+	actions := []types.ActionDescriptor{
+		{Action: ActionTurnOn},
+		{Action: ActionTurnOff},
+		{Action: ActionSetBrightness, Fields: brightness},
+		{Action: ActionSetRGB, Fields: rgb},
+		{Action: ActionSetTemperature, Fields: temperature},
+		{Action: ActionSetScene, Fields: scene},
+	}
+
+	return types.DomainDescriptor{
+		Domain:   Type,
+		Commands: actions,
+		Events:   actions,
+	}
+}
+
+func intPtr(v int) *int { return &v }
+
 func SupportedActions() []string {
 	return []string{
 		ActionTurnOn,
