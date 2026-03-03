@@ -26,6 +26,8 @@ type State struct {
 	Scene       string `json:"scene,omitempty"`
 }
 
+func (State) CommandResponsePayloadKind() string { return Type }
+
 type Command struct {
 	Type        string  `json:"type"`
 	Brightness  *int    `json:"brightness,omitempty"`
@@ -33,6 +35,8 @@ type Command struct {
 	Temperature *int    `json:"temperature,omitempty"`
 	Scene       *string `json:"scene,omitempty"`
 }
+
+func (Command) CommandRequestPayloadKind() string { return Type }
 
 type Event struct {
 	Type             string   `json:"type"`
@@ -107,6 +111,9 @@ func ValidateCommand(c Command) error {
 		if c.Brightness == nil {
 			return fmt.Errorf("brightness required for %s", ActionSetBrightness)
 		}
+		if *c.Brightness < 0 || *c.Brightness > 100 {
+			return fmt.Errorf("brightness must be between 0 and 100")
+		}
 		return nil
 	case ActionSetRGB:
 		if c.RGB == nil || len(*c.RGB) != 3 {
@@ -131,6 +138,9 @@ func ValidateCommand(c Command) error {
 func ValidateEvent(e Event) error {
 	switch e.Type {
 	case ActionTurnOn, ActionTurnOff, ActionSetBrightness, ActionSetRGB, ActionSetTemperature, ActionSetScene:
+		if e.Brightness != nil && (*e.Brightness < 0 || *e.Brightness > 100) {
+			return fmt.Errorf("brightness must be between 0 and 100")
+		}
 		return nil
 	default:
 		return fmt.Errorf("unsupported light event: %s", e.Type)
@@ -213,12 +223,21 @@ func (s Store) SetReportedFromEvent(evt Event) error {
 	return s.writeEffective(st)
 }
 
-func (s Store) TurnOn() error              { return s.SetDesiredFromCommand(Command{Type: ActionTurnOn}) }
-func (s Store) TurnOff() error             { return s.SetDesiredFromCommand(Command{Type: ActionTurnOff}) }
-func (s Store) SetBrightness(v int) error  { return s.SetDesiredFromCommand(Command{Type: ActionSetBrightness, Brightness: &v}) }
-func (s Store) SetRGB(r, g, b int) error   { rgb := []int{r, g, b}; return s.SetDesiredFromCommand(Command{Type: ActionSetRGB, RGB: &rgb}) }
-func (s Store) SetTemperature(v int) error { return s.SetDesiredFromCommand(Command{Type: ActionSetTemperature, Temperature: &v}) }
-func (s Store) SetScene(scene string) error { return s.SetDesiredFromCommand(Command{Type: ActionSetScene, Scene: &scene}) }
+func (s Store) TurnOn() error  { return s.SetDesiredFromCommand(Command{Type: ActionTurnOn}) }
+func (s Store) TurnOff() error { return s.SetDesiredFromCommand(Command{Type: ActionTurnOff}) }
+func (s Store) SetBrightness(v int) error {
+	return s.SetDesiredFromCommand(Command{Type: ActionSetBrightness, Brightness: &v})
+}
+func (s Store) SetRGB(r, g, b int) error {
+	rgb := []int{r, g, b}
+	return s.SetDesiredFromCommand(Command{Type: ActionSetRGB, RGB: &rgb})
+}
+func (s Store) SetTemperature(v int) error {
+	return s.SetDesiredFromCommand(Command{Type: ActionSetTemperature, Temperature: &v})
+}
+func (s Store) SetScene(scene string) error {
+	return s.SetDesiredFromCommand(Command{Type: ActionSetScene, Scene: &scene})
+}
 
 func decodeState(raw json.RawMessage) (State, error) {
 	if len(raw) == 0 {

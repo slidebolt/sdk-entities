@@ -18,9 +18,13 @@ type State struct {
 	Power bool `json:"power"`
 }
 
+func (State) CommandResponsePayloadKind() string { return Type }
+
 type Command struct {
 	Type string `json:"type"`
 }
+
+func (Command) CommandRequestPayloadKind() string { return Type }
 
 type Event struct {
 	Type             string   `json:"type"`
