@@ -137,9 +137,29 @@ func ValidateCommand(c Command) error {
 
 func ValidateEvent(e Event) error {
 	switch e.Type {
-	case ActionTurnOn, ActionTurnOff, ActionSetBrightness, ActionSetRGB, ActionSetTemperature, ActionSetScene:
-		if e.Brightness != nil && (*e.Brightness < 0 || *e.Brightness > 100) {
+	case ActionTurnOn, ActionTurnOff:
+		return nil
+	case ActionSetBrightness:
+		if e.Brightness == nil {
+			return fmt.Errorf("brightness required for %s", ActionSetBrightness)
+		}
+		if *e.Brightness < 0 || *e.Brightness > 100 {
 			return fmt.Errorf("brightness must be between 0 and 100")
+		}
+		return nil
+	case ActionSetRGB:
+		if e.RGB == nil || len(*e.RGB) != 3 {
+			return fmt.Errorf("rgb[3] required for %s", ActionSetRGB)
+		}
+		return nil
+	case ActionSetTemperature:
+		if e.Temperature == nil {
+			return fmt.Errorf("temperature required for %s", ActionSetTemperature)
+		}
+		return nil
+	case ActionSetScene:
+		if e.Scene == nil || *e.Scene == "" {
+			return fmt.Errorf("scene required for %s", ActionSetScene)
 		}
 		return nil
 	default:
@@ -175,7 +195,10 @@ func (s Store) Desired() (State, error)  { return decodeState(s.entity.Data.Desi
 func (s Store) Reported() (State, error) { return decodeState(s.entity.Data.Reported) }
 
 func (s Store) SetDesiredFromCommand(cmd Command) error {
-	st, _ := s.Desired()
+	st, err := s.Desired()
+	if err != nil {
+		return err
+	}
 	switch cmd.Type {
 	case ActionTurnOn:
 		st.Power = true
@@ -194,7 +217,10 @@ func (s Store) SetDesiredFromCommand(cmd Command) error {
 }
 
 func (s Store) SetReportedFromEvent(evt Event) error {
-	st, _ := s.Reported()
+	st, err := s.Reported()
+	if err != nil {
+		return err
+	}
 	switch evt.Type {
 	case ActionTurnOn:
 		st.Power = true

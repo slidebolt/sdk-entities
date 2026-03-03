@@ -111,7 +111,10 @@ func (s Store) Supports(action string) bool {
 }
 
 func (s Store) SetDesiredFromCommand(cmd Command) error {
-	st, _ := s.readDesired()
+	st, err := s.readDesired()
+	if err != nil {
+		return err
+	}
 	switch cmd.Type {
 	case ActionTurnOn:
 		st.Power = true
@@ -127,7 +130,10 @@ func (s Store) SetDesiredFromCommand(cmd Command) error {
 }
 
 func (s Store) SetReportedFromEvent(evt Event) error {
-	st, _ := s.readReported()
+	st, err := s.readReported()
+	if err != nil {
+		return err
+	}
 	switch evt.Type {
 	case ActionTurnOn:
 		st.Power = true
