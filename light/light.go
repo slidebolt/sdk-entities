@@ -50,6 +50,51 @@ type Event struct {
 
 func init() {
 	types.RegisterDomain(Describe())
+	types.RegisterStateToCommands(Type, func(stateJSON json.RawMessage) ([]json.RawMessage, error) {
+		var st State
+		if err := json.Unmarshal(stateJSON, &st); err != nil {
+			return nil, err
+		}
+		cmds := CommandsFromState(st)
+		out := make([]json.RawMessage, 0, len(cmds))
+		for _, c := range cmds {
+			b, err := json.Marshal(c)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, b)
+		}
+		return out, nil
+	})
+}
+
+// CommandsFromState decomposes a State into the minimal ordered slice of
+// Commands needed to reproduce it. Power is always first so hardware reaches
+// the correct on/off state before attribute changes are applied.
+func CommandsFromState(st State) []Command {
+	cmds := make([]Command, 0, 5)
+	if st.Power {
+		cmds = append(cmds, Command{Type: ActionTurnOn})
+	} else {
+		cmds = append(cmds, Command{Type: ActionTurnOff})
+	}
+	if st.Brightness != 0 {
+		b := st.Brightness
+		cmds = append(cmds, Command{Type: ActionSetBrightness, Brightness: &b})
+	}
+	if len(st.RGB) == 3 {
+		rgb := cloneInts(st.RGB)
+		cmds = append(cmds, Command{Type: ActionSetRGB, RGB: &rgb})
+	}
+	if st.Temperature != 0 {
+		temp := st.Temperature
+		cmds = append(cmds, Command{Type: ActionSetTemperature, Temperature: &temp})
+	}
+	if st.Scene != "" {
+		scene := st.Scene
+		cmds = append(cmds, Command{Type: ActionSetScene, Scene: &scene})
+	}
+	return cmds
 }
 
 func Describe() types.DomainDescriptor {

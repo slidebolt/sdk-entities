@@ -34,6 +34,30 @@ type Event struct {
 
 func init() {
 	types.RegisterDomain(Describe())
+	types.RegisterStateToCommands(Type, func(stateJSON json.RawMessage) ([]json.RawMessage, error) {
+		var st State
+		if err := json.Unmarshal(stateJSON, &st); err != nil {
+			return nil, err
+		}
+		cmds := CommandsFromState(st)
+		out := make([]json.RawMessage, 0, len(cmds))
+		for _, c := range cmds {
+			b, err := json.Marshal(c)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, b)
+		}
+		return out, nil
+	})
+}
+
+// CommandsFromState returns the single Command needed to reproduce the given State.
+func CommandsFromState(st State) []Command {
+	if st.Power {
+		return []Command{{Type: ActionTurnOn}}
+	}
+	return []Command{{Type: ActionTurnOff}}
 }
 
 func Describe() types.DomainDescriptor {
