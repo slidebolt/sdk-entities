@@ -121,6 +121,79 @@ func TestStoreSetReportedFromEventWritesEffective(t *testing.T) {
 	}
 }
 
+func TestStoreSetReportedFromEvent_TurnOnCarriesAttributes(t *testing.T) {
+	entity := &types.Entity{}
+	store := Bind(entity)
+
+	brightness := 42
+	rgb := []int{255, 0, 0}
+	temp := 3200
+	scene := "movie"
+	if err := store.SetReportedFromEvent(Event{
+		Type:        ActionTurnOn,
+		Brightness:  &brightness,
+		RGB:         &rgb,
+		Temperature: &temp,
+		Scene:       &scene,
+	}); err != nil {
+		t.Fatalf("SetReportedFromEvent failed: %v", err)
+	}
+
+	reported, err := store.Reported()
+	if err != nil {
+		t.Fatalf("Reported failed: %v", err)
+	}
+	if !reported.Power || reported.Brightness != 42 || reported.Temperature != 3200 || reported.Scene != "movie" {
+		t.Fatalf("unexpected reported state: %+v", reported)
+	}
+	if len(reported.RGB) != 3 || reported.RGB[0] != 255 || reported.RGB[1] != 0 || reported.RGB[2] != 0 {
+		t.Fatalf("unexpected reported rgb: %v", reported.RGB)
+	}
+
+	effective, err := decodeState(entity.Data.Effective)
+	if err != nil {
+		t.Fatalf("decode effective failed: %v", err)
+	}
+	if !effective.Power || effective.Brightness != 42 || effective.Temperature != 3200 || effective.Scene != "movie" {
+		t.Fatalf("unexpected effective state: %+v", effective)
+	}
+	if len(effective.RGB) != 3 || effective.RGB[0] != 255 || effective.RGB[1] != 0 || effective.RGB[2] != 0 {
+		t.Fatalf("unexpected effective rgb: %v", effective.RGB)
+	}
+	if effective.ColorMode != ColorModeScene {
+		t.Fatalf("expected effective color_mode=%q, got %q", ColorModeScene, effective.ColorMode)
+	}
+}
+
+func TestStoreSetDesiredFromCommandSetsColorMode(t *testing.T) {
+	entity := &types.Entity{}
+	store := Bind(entity)
+
+	rgb := []int{255, 0, 0}
+	if err := store.SetDesiredFromCommand(Command{Type: ActionSetRGB, RGB: &rgb}); err != nil {
+		t.Fatalf("SetDesiredFromCommand set_rgb failed: %v", err)
+	}
+	desired, err := store.Desired()
+	if err != nil {
+		t.Fatalf("Desired failed: %v", err)
+	}
+	if desired.ColorMode != ColorModeRGB {
+		t.Fatalf("expected desired color_mode=%q, got %q", ColorModeRGB, desired.ColorMode)
+	}
+
+	temp := 2700
+	if err := store.SetDesiredFromCommand(Command{Type: ActionSetTemperature, Temperature: &temp}); err != nil {
+		t.Fatalf("SetDesiredFromCommand set_temperature failed: %v", err)
+	}
+	desired, err = store.Desired()
+	if err != nil {
+		t.Fatalf("Desired failed: %v", err)
+	}
+	if desired.ColorMode != ColorModeTemperature {
+		t.Fatalf("expected desired color_mode=%q, got %q", ColorModeTemperature, desired.ColorMode)
+	}
+}
+
 func TestStorePropagatesDecodeErrors(t *testing.T) {
 	badJSON := json.RawMessage(`{"power":`)
 
