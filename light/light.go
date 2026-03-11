@@ -3,6 +3,8 @@ package light
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/slidebolt/sdk-types"
 )
@@ -18,12 +20,19 @@ const (
 	ActionSetScene       = "set_scene"
 )
 
+const (
+	ColorModeRGB         = "rgb"
+	ColorModeTemperature = "temperature"
+	ColorModeScene       = "scene"
+)
+
 type State struct {
 	Power       bool   `json:"power"`
 	Brightness  int    `json:"brightness,omitempty"`
 	RGB         []int  `json:"rgb,omitempty"`
 	Temperature int    `json:"temperature,omitempty"`
 	Scene       string `json:"scene,omitempty"`
+	ColorMode   string `json:"color_mode,omitempty"`
 }
 
 func (State) CommandResponsePayloadKind() string { return Type }
@@ -44,12 +53,125 @@ type Event struct {
 	RGB              *[]int   `json:"rgb,omitempty"`
 	Temperature      *int     `json:"temperature,omitempty"`
 	Scene            *string  `json:"scene,omitempty"`
+	ColorMode        *string  `json:"color_mode,omitempty"`
 	AvailableActions []string `json:"available_actions,omitempty"`
 	Cause            string   `json:"cause,omitempty"`
 }
 
 func init() {
 	types.RegisterDomain(Describe())
+	types.RegisterStateToCommands(Type, func(stateJSON json.RawMessage) ([]json.RawMessage, error) {
+		cmds, err := commandsFromStateJSON(stateJSON)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]json.RawMessage, 0, len(cmds))
+		for _, c := range cmds {
+			b, err := json.Marshal(c)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, b)
+		}
+		return out, nil
+	})
+}
+
+type stateWithPresence struct {
+	Power       bool    `json:"power"`
+	Brightness  *int    `json:"brightness,omitempty"`
+	RGB         *[]int  `json:"rgb,omitempty"`
+	Temperature *int    `json:"temperature,omitempty"`
+	Scene       *string `json:"scene,omitempty"`
+	ColorMode   *string `json:"color_mode,omitempty"`
+}
+
+func commandsFromStateJSON(stateJSON json.RawMessage) ([]Command, error) {
+	var st stateWithPresence
+	if err := json.Unmarshal(stateJSON, &st); err != nil {
+		return nil, err
+	}
+
+	cmds := make([]Command, 0, 5)
+	if st.Power {
+		cmds = append(cmds, Command{Type: ActionTurnOn})
+	} else {
+		cmds = append(cmds, Command{Type: ActionTurnOff})
+	}
+	if st.Brightness != nil {
+		b := *st.Brightness
+		cmds = append(cmds, Command{Type: ActionSetBrightness, Brightness: &b})
+	}
+	mode := inferColorModeWithPresence(st.ColorMode, st.Scene, st.RGB, st.Temperature)
+	switch mode {
+	case ColorModeScene:
+		if st.Scene != nil && *st.Scene != "" {
+			scene := *st.Scene
+			cmds = append(cmds, Command{Type: ActionSetScene, Scene: &scene})
+		}
+	case ColorModeRGB:
+		if st.RGB != nil && len(*st.RGB) == 3 {
+			rgb := cloneInts(*st.RGB)
+			cmds = append(cmds, Command{Type: ActionSetRGB, RGB: &rgb})
+		}
+	case ColorModeTemperature:
+		if st.Temperature != nil {
+			temp := *st.Temperature
+			cmds = append(cmds, Command{Type: ActionSetTemperature, Temperature: &temp})
+		}
+	}
+	return cmds, nil
+}
+
+// CommandsFromState decomposes a State into the minimal ordered slice of
+// Commands needed to reproduce it. Power is always first so hardware reaches
+// the correct on/off state before attribute changes are applied.
+func CommandsFromState(st State) []Command {
+	cmds := make([]Command, 0, 5)
+	if st.Power {
+		cmds = append(cmds, Command{Type: ActionTurnOn})
+	} else {
+		cmds = append(cmds, Command{Type: ActionTurnOff})
+	}
+	if st.Brightness != 0 {
+		b := st.Brightness
+		cmds = append(cmds, Command{Type: ActionSetBrightness, Brightness: &b})
+	}
+	mode, _ := normalizeColorMode(st.ColorMode)
+	if mode == "" {
+		// Legacy behavior for call sites that still rely on this helper directly.
+		if len(st.RGB) == 3 {
+			rgb := cloneInts(st.RGB)
+			cmds = append(cmds, Command{Type: ActionSetRGB, RGB: &rgb})
+		}
+		if st.Temperature != 0 {
+			temp := st.Temperature
+			cmds = append(cmds, Command{Type: ActionSetTemperature, Temperature: &temp})
+		}
+		if st.Scene != "" {
+			scene := st.Scene
+			cmds = append(cmds, Command{Type: ActionSetScene, Scene: &scene})
+		}
+		return cmds
+	}
+	switch mode {
+	case ColorModeScene:
+		if st.Scene != "" {
+			scene := st.Scene
+			cmds = append(cmds, Command{Type: ActionSetScene, Scene: &scene})
+		}
+	case ColorModeRGB:
+		if len(st.RGB) == 3 {
+			rgb := cloneInts(st.RGB)
+			cmds = append(cmds, Command{Type: ActionSetRGB, RGB: &rgb})
+		}
+	case ColorModeTemperature:
+		if st.Temperature != 0 {
+			temp := st.Temperature
+			cmds = append(cmds, Command{Type: ActionSetTemperature, Temperature: &temp})
+		}
+	}
+	return cmds
 }
 
 func Describe() types.DomainDescriptor {
@@ -170,10 +292,11 @@ func ValidateEvent(e Event) error {
 // Store binds to an Entity and manages desired/reported/effective light state.
 type Store struct {
 	entity *types.Entity
+	mu     *sync.RWMutex
 }
 
 func Bind(entity *types.Entity) Store {
-	return Store{entity: entity}
+	return Store{entity: entity, mu: &sync.RWMutex{}}
 }
 
 func (s Store) EnsureDefaultActions() {
@@ -191,11 +314,23 @@ func (s Store) Supports(action string) bool {
 	return false
 }
 
-func (s Store) Desired() (State, error)  { return decodeState(s.entity.Data.Desired) }
-func (s Store) Reported() (State, error) { return decodeState(s.entity.Data.Reported) }
+func (s Store) Desired() (State, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return decodeState(s.entity.Data.Desired)
+}
+
+func (s Store) Reported() (State, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return decodeState(s.entity.Data.Reported)
+}
 
 func (s Store) SetDesiredFromCommand(cmd Command) error {
-	st, err := s.Desired()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	st, err := decodeState(s.entity.Data.Desired)
 	if err != nil {
 		return err
 	}
@@ -208,16 +343,22 @@ func (s Store) SetDesiredFromCommand(cmd Command) error {
 		st.Brightness = *cmd.Brightness
 	case ActionSetRGB:
 		st.RGB = cloneInts(*cmd.RGB)
+		st.ColorMode = ColorModeRGB
 	case ActionSetTemperature:
 		st.Temperature = *cmd.Temperature
+		st.ColorMode = ColorModeTemperature
 	case ActionSetScene:
 		st.Scene = *cmd.Scene
+		st.ColorMode = ColorModeScene
 	}
 	return s.writeDesired(st)
 }
 
 func (s Store) SetReportedFromEvent(evt Event) error {
-	st, err := s.Reported()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	st, err := decodeState(s.entity.Data.Reported)
 	if err != nil {
 		return err
 	}
@@ -226,21 +367,34 @@ func (s Store) SetReportedFromEvent(evt Event) error {
 		st.Power = true
 	case ActionTurnOff:
 		st.Power = false
-	case ActionSetBrightness:
-		if evt.Brightness != nil {
-			st.Brightness = *evt.Brightness
+	case ActionSetBrightness, ActionSetRGB, ActionSetTemperature, ActionSetScene:
+	}
+	// Preserve optional attribute updates regardless of event type. Some
+	// providers attach brightness/rgb fields to turn_on events.
+	if evt.Brightness != nil {
+		st.Brightness = *evt.Brightness
+	}
+	if evt.RGB != nil {
+		st.RGB = cloneInts(*evt.RGB)
+	}
+	if evt.Temperature != nil {
+		st.Temperature = *evt.Temperature
+	}
+	if evt.Scene != nil {
+		st.Scene = *evt.Scene
+	}
+	if evt.ColorMode != nil {
+		if mode, ok := normalizeColorMode(*evt.ColorMode); ok {
+			st.ColorMode = mode
 		}
-	case ActionSetRGB:
-		if evt.RGB != nil {
-			st.RGB = cloneInts(*evt.RGB)
-		}
-	case ActionSetTemperature:
-		if evt.Temperature != nil {
-			st.Temperature = *evt.Temperature
-		}
-	case ActionSetScene:
-		if evt.Scene != nil {
-			st.Scene = *evt.Scene
+	} else {
+		// Infer active mode when providers send mixed turn_on + attributes.
+		if evt.Scene != nil && *evt.Scene != "" {
+			st.ColorMode = ColorModeScene
+		} else if evt.RGB != nil && len(*evt.RGB) == 3 {
+			st.ColorMode = ColorModeRGB
+		} else if evt.Temperature != nil {
+			st.ColorMode = ColorModeTemperature
 		}
 	}
 	if err := s.writeReported(st); err != nil {
@@ -304,4 +458,36 @@ func cloneInts(src []int) []int {
 	dst := make([]int, len(src))
 	copy(dst, src)
 	return dst
+}
+
+func normalizeColorMode(raw string) (string, bool) {
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	switch mode {
+	case ColorModeRGB, "rgbw", "rgbww", "rgbcw":
+		return ColorModeRGB, true
+	case ColorModeTemperature, "color_temperature", "color_temp", "ct":
+		return ColorModeTemperature, true
+	case ColorModeScene, "effect":
+		return ColorModeScene, true
+	default:
+		return "", false
+	}
+}
+
+func inferColorModeWithPresence(explicit *string, scene *string, rgb *[]int, temperature *int) string {
+	if explicit != nil {
+		if mode, ok := normalizeColorMode(*explicit); ok {
+			return mode
+		}
+	}
+	if scene != nil && *scene != "" {
+		return ColorModeScene
+	}
+	if rgb != nil && len(*rgb) == 3 {
+		return ColorModeRGB
+	}
+	if temperature != nil {
+		return ColorModeTemperature
+	}
+	return ""
 }

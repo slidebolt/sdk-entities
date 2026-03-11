@@ -3,6 +3,7 @@ package entityswitch
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/slidebolt/sdk-types"
 )
@@ -34,6 +35,30 @@ type Event struct {
 
 func init() {
 	types.RegisterDomain(Describe())
+	types.RegisterStateToCommands(Type, func(stateJSON json.RawMessage) ([]json.RawMessage, error) {
+		var st State
+		if err := json.Unmarshal(stateJSON, &st); err != nil {
+			return nil, err
+		}
+		cmds := CommandsFromState(st)
+		out := make([]json.RawMessage, 0, len(cmds))
+		for _, c := range cmds {
+			b, err := json.Marshal(c)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, b)
+		}
+		return out, nil
+	})
+}
+
+// CommandsFromState returns the single Command needed to reproduce the given State.
+func CommandsFromState(st State) []Command {
+	if st.Power {
+		return []Command{{Type: ActionTurnOn}}
+	}
+	return []Command{{Type: ActionTurnOff}}
 }
 
 func Describe() types.DomainDescriptor {
@@ -89,10 +114,11 @@ func ValidateEvent(e Event) error {
 // Store binds to an Entity and manages desired/reported switch state.
 type Store struct {
 	entity *types.Entity
+	mu     *sync.RWMutex
 }
 
 func Bind(entity *types.Entity) Store {
-	return Store{entity: entity}
+	return Store{entity: entity, mu: &sync.RWMutex{}}
 }
 
 func (s Store) EnsureDefaultActions() {
@@ -111,7 +137,10 @@ func (s Store) Supports(action string) bool {
 }
 
 func (s Store) SetDesiredFromCommand(cmd Command) error {
-	st, err := s.readDesired()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	st, err := decodeState(s.entity.Data.Desired)
 	if err != nil {
 		return err
 	}
@@ -130,7 +159,10 @@ func (s Store) SetDesiredFromCommand(cmd Command) error {
 }
 
 func (s Store) SetReportedFromEvent(evt Event) error {
-	st, err := s.readReported()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	st, err := decodeState(s.entity.Data.Reported)
 	if err != nil {
 		return err
 	}
@@ -149,8 +181,17 @@ func (s Store) SetReportedFromEvent(evt Event) error {
 	return nil
 }
 
-func (s Store) readDesired() (State, error)  { return decodeState(s.entity.Data.Desired) }
-func (s Store) readReported() (State, error) { return decodeState(s.entity.Data.Reported) }
+func (s Store) readDesired() (State, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return decodeState(s.entity.Data.Desired)
+}
+
+func (s Store) readReported() (State, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return decodeState(s.entity.Data.Reported)
+}
 
 func decodeState(raw json.RawMessage) (State, error) {
 	if len(raw) == 0 {
