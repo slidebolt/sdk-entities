@@ -118,7 +118,7 @@ func TestPublicStateAccess(t *testing.T) {
 	store := Bind(entity)
 
 	// Set some state first
-	store.SetDesiredFromCommand(Command{Type: ActionTurnOn})
+	_ = store.SetDesiredFromCommand(Command{Type: ActionTurnOn})
 
 	// Verify we can access state via decodeState (the workaround)
 	state, err := decodeState(entity.Data.Desired)

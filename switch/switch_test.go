@@ -38,7 +38,7 @@ func TestStoreSetDesiredAndReported(t *testing.T) {
 	if err := store.SetDesiredFromCommand(Command{Type: ActionTurnOn}); err != nil {
 		t.Fatalf("SetDesiredFromCommand failed: %v", err)
 	}
-	desired, err := decodeState(entity.Data.Desired)
+	desired, err := store.readDesired()
 	if err != nil {
 		t.Fatalf("decode desired failed: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestStoreSetDesiredAndReported(t *testing.T) {
 	if err := store.SetReportedFromEvent(Event{Type: ActionTurnOff}); err != nil {
 		t.Fatalf("SetReportedFromEvent failed: %v", err)
 	}
-	reported, err := decodeState(entity.Data.Reported)
+	reported, err := store.readReported()
 	if err != nil {
 		t.Fatalf("decode reported failed: %v", err)
 	}

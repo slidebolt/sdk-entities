@@ -99,8 +99,8 @@ func TestMultipleStoreBindings_CoordinationIssue(t *testing.T) {
 	store2 := Bind(entity)
 
 	// Both stores write to same entity
-	store1.SetDesiredFromCommand(Command{Type: ActionTurnOn})
-	store2.SetDesiredFromCommand(Command{Type: ActionTurnOff})
+	_ = store1.SetDesiredFromCommand(Command{Type: ActionTurnOn})
+	_ = store2.SetDesiredFromCommand(Command{Type: ActionTurnOff})
 
 	// Last write wins
 	state, _ := store1.readDesired()
@@ -148,9 +148,9 @@ func TestConcurrentAccess_Race(t *testing.T) {
 	// Rapidly toggle state
 	for i := 0; i < 1000; i++ {
 		if i%2 == 0 {
-			store.SetDesiredFromCommand(Command{Type: ActionTurnOn})
+			_ = store.SetDesiredFromCommand(Command{Type: ActionTurnOn})
 		} else {
-			store.SetDesiredFromCommand(Command{Type: ActionTurnOff})
+			_ = store.SetDesiredFromCommand(Command{Type: ActionTurnOff})
 		}
 	}
 
@@ -296,7 +296,7 @@ func TestSetReportedFromEvent_InvalidEventType(t *testing.T) {
 	store := Bind(entity)
 
 	// Set power on first
-	store.SetDesiredFromCommand(Command{Type: ActionTurnOn})
+	_ = store.SetDesiredFromCommand(Command{Type: ActionTurnOn})
 
 	// Now send invalid event
 	invalidEvent := Event{Type: "invalid_type"}

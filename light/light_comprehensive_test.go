@@ -130,7 +130,9 @@ func TestStoreTurnOff(t *testing.T) {
 	store := Bind(entity)
 
 	// First turn on
-	store.TurnOn()
+	if err := store.TurnOn(); err != nil {
+		t.Fatalf("TurnOn failed: %v", err)
+	}
 
 	// Then turn off
 	if err := store.TurnOff(); err != nil {
@@ -224,70 +226,51 @@ func TestStoreSetScene(t *testing.T) {
 
 // === NIL POINTER SAFETY TESTS ===
 
-func TestSetDesiredFromCommand_NilBrightnessPanics(t *testing.T) {
-	// This test documents the current behavior - SetDesiredFromCommand
-	// assumes validation has run and will panic on nil pointer dereference
-	// if validation is bypassed.
+func TestSetDesiredFromCommand_NilBrightnessReturnsError(t *testing.T) {
+	// This test documents that SetDesiredFromCommand now validates input
+	// and returns an error instead of panicking on nil pointer dereference.
 	entity := &types.Entity{Data: types.EntityData{}}
 	store := Bind(entity)
 
-	// Command with nil Brightness pointer (bypassing validation)
+	// Command with nil Brightness pointer
 	cmd := Command{Type: ActionSetBrightness, Brightness: nil}
 
-	// This should panic due to nil pointer dereference at line 253
-	// st.Brightness = *cmd.Brightness
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic from nil pointer dereference, but none occurred")
-		}
-	}()
-
-	store.SetDesiredFromCommand(cmd)
+	if err := store.SetDesiredFromCommand(cmd); err == nil {
+		t.Error("expected error from nil pointer, but none occurred")
+	}
 }
 
-func TestSetDesiredFromCommand_NilRGBPanics(t *testing.T) {
+func TestSetDesiredFromCommand_NilRGBReturnsError(t *testing.T) {
 	entity := &types.Entity{Data: types.EntityData{}}
 	store := Bind(entity)
 
 	cmd := Command{Type: ActionSetRGB, RGB: nil}
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic from nil RGB dereference, but none occurred")
-		}
-	}()
-
-	store.SetDesiredFromCommand(cmd)
+	if err := store.SetDesiredFromCommand(cmd); err == nil {
+		t.Error("expected error from nil RGB, but none occurred")
+	}
 }
 
-func TestSetDesiredFromCommand_NilTemperaturePanics(t *testing.T) {
+func TestSetDesiredFromCommand_NilTemperatureReturnsError(t *testing.T) {
 	entity := &types.Entity{Data: types.EntityData{}}
 	store := Bind(entity)
 
 	cmd := Command{Type: ActionSetTemperature, Temperature: nil}
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic from nil Temperature dereference, but none occurred")
-		}
-	}()
-
-	store.SetDesiredFromCommand(cmd)
+	if err := store.SetDesiredFromCommand(cmd); err == nil {
+		t.Error("expected error from nil Temperature, but none occurred")
+	}
 }
 
-func TestSetDesiredFromCommand_NilScenePanics(t *testing.T) {
+func TestSetDesiredFromCommand_NilSceneReturnsError(t *testing.T) {
 	entity := &types.Entity{Data: types.EntityData{}}
 	store := Bind(entity)
 
 	cmd := Command{Type: ActionSetScene, Scene: nil}
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic from nil Scene dereference, but none occurred")
-		}
-	}()
-
-	store.SetDesiredFromCommand(cmd)
+	if err := store.SetDesiredFromCommand(cmd); err == nil {
+		t.Error("expected error from nil Scene, but none occurred")
+	}
 }
 
 // === CONCURRENT ACCESS TESTS ===
@@ -306,7 +289,7 @@ func TestConcurrentStoreAccess(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 			for j := 0; j < iterations; j++ {
-				brightness := id*iterations + j
+				brightness := (id*iterations + j) % 101
 				if err := store.SetBrightness(brightness); err != nil {
 					t.Errorf("goroutine %d iteration %d: SetBrightness failed: %v", id, j, err)
 				}

@@ -26,6 +26,13 @@ const (
 	ColorModeScene       = "scene"
 )
 
+const (
+	MaxRGBLength    = 3
+	MaxSceneLength  = 256
+	MaxBrightness   = 100
+	MinBrightness   = 0
+)
+
 type State struct {
 	Power       bool   `json:"power"`
 	Brightness  int    `json:"brightness,omitempty"`
@@ -233,13 +240,18 @@ func ValidateCommand(c Command) error {
 		if c.Brightness == nil {
 			return fmt.Errorf("brightness required for %s", ActionSetBrightness)
 		}
-		if *c.Brightness < 0 || *c.Brightness > 100 {
-			return fmt.Errorf("brightness must be between 0 and 100")
+		if *c.Brightness < MinBrightness || *c.Brightness > MaxBrightness {
+			return fmt.Errorf("brightness must be between %d and %d", MinBrightness, MaxBrightness)
 		}
 		return nil
 	case ActionSetRGB:
-		if c.RGB == nil || len(*c.RGB) != 3 {
-			return fmt.Errorf("rgb[3] required for %s", ActionSetRGB)
+		if c.RGB == nil || len(*c.RGB) != MaxRGBLength {
+			return fmt.Errorf("rgb[%d] required for %s", MaxRGBLength, ActionSetRGB)
+		}
+		for _, v := range *c.RGB {
+			if v < 0 || v > 255 {
+				return fmt.Errorf("rgb component %d out of bounds (0-255)", v)
+			}
 		}
 		return nil
 	case ActionSetTemperature:
@@ -250,6 +262,9 @@ func ValidateCommand(c Command) error {
 	case ActionSetScene:
 		if c.Scene == nil || *c.Scene == "" {
 			return fmt.Errorf("scene required for %s", ActionSetScene)
+		}
+		if len(*c.Scene) > MaxSceneLength {
+			return fmt.Errorf("scene name too long (max %d)", MaxSceneLength)
 		}
 		return nil
 	default:
@@ -265,13 +280,18 @@ func ValidateEvent(e Event) error {
 		if e.Brightness == nil {
 			return fmt.Errorf("brightness required for %s", ActionSetBrightness)
 		}
-		if *e.Brightness < 0 || *e.Brightness > 100 {
-			return fmt.Errorf("brightness must be between 0 and 100")
+		if *e.Brightness < MinBrightness || *e.Brightness > MaxBrightness {
+			return fmt.Errorf("brightness must be between %d and %d", MinBrightness, MaxBrightness)
 		}
 		return nil
 	case ActionSetRGB:
-		if e.RGB == nil || len(*e.RGB) != 3 {
-			return fmt.Errorf("rgb[3] required for %s", ActionSetRGB)
+		if e.RGB == nil || len(*e.RGB) != MaxRGBLength {
+			return fmt.Errorf("rgb[%d] required for %s", MaxRGBLength, ActionSetRGB)
+		}
+		for _, v := range *e.RGB {
+			if v < 0 || v > 255 {
+				return fmt.Errorf("rgb component %d out of bounds (0-255)", v)
+			}
 		}
 		return nil
 	case ActionSetTemperature:
@@ -282,6 +302,9 @@ func ValidateEvent(e Event) error {
 	case ActionSetScene:
 		if e.Scene == nil || *e.Scene == "" {
 			return fmt.Errorf("scene required for %s", ActionSetScene)
+		}
+		if len(*e.Scene) > MaxSceneLength {
+			return fmt.Errorf("scene name too long (max %d)", MaxSceneLength)
 		}
 		return nil
 	default:
@@ -327,6 +350,10 @@ func (s Store) Reported() (State, error) {
 }
 
 func (s Store) SetDesiredFromCommand(cmd Command) error {
+	if err := ValidateCommand(cmd); err != nil {
+		return err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -355,6 +382,10 @@ func (s Store) SetDesiredFromCommand(cmd Command) error {
 }
 
 func (s Store) SetReportedFromEvent(evt Event) error {
+	if err := ValidateEvent(evt); err != nil {
+		return err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

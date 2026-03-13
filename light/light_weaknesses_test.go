@@ -80,8 +80,8 @@ func TestPartialJSONUpdate_DataLoss(t *testing.T) {
 }
 
 // === BREAKING TEST: Validation Bypass via Direct Command ===
-// This exposes that SetDesiredFromCommand trusts input without validation
-func TestValidationBypass_DirectCommand(t *testing.T) {
+// This verifies that SetDesiredFromCommand now validates input
+func TestValidation_DirectCommand(t *testing.T) {
 	entity := &types.Entity{Data: types.EntityData{}}
 	store := Bind(entity)
 
@@ -92,56 +92,41 @@ func TestValidationBypass_DirectCommand(t *testing.T) {
 		Brightness: &invalidBrightness,
 	}
 
-	// This should fail validation, but SetDesiredFromCommand doesn't validate!
+	// This should now fail validation
 	err := store.SetDesiredFromCommand(cmd)
-	if err != nil {
-		t.Fatalf("SetDesiredFromCommand rejected invalid command - this is unexpected: %v", err)
+	if err == nil {
+		t.Error("expected error from invalid brightness, but none occurred")
 	}
 
-	// The invalid value was accepted
-	state, _ := store.Desired()
-	if state.Brightness == 200 {
-		t.Error("BUG: Invalid brightness value (200) was accepted without validation")
-	}
-
-	// ValidateCommand would have caught this:
-	if err := ValidateCommand(cmd); err == nil {
-		t.Error("BUG: ValidateCommand should reject brightness=200, but it was accepted")
-	}
-
-	t.Log("WARNING: Design flaw - SetDesiredFromCommand doesn't call ValidateCommand")
+	t.Log("SUCCESS: SetDesiredFromCommand now calls ValidateCommand")
 }
 
-// === BREAKING TEST: RGB Array Bounds Not Validated ===
-// This exposes that RGB values can be any integers, not just 0-255
-func TestRGBBoundsValidation_Missing(t *testing.T) {
-	// RGB values should be 0-255, but the system accepts any integers
+// === BREAKING TEST: RGB Array Bounds Validation ===
+// This verifies that RGB values are now validated
+func TestRGBBoundsValidation(t *testing.T) {
+	// RGB values should be 0-255
 	invalidRGB := []int{999, -50, 1000}
 	cmd := Command{
 		Type: ActionSetRGB,
 		RGB:  &invalidRGB,
 	}
 
-	// ValidateCommand doesn't check RGB value ranges
-	if err := ValidateCommand(cmd); err != nil {
-		t.Logf("RGB bounds validated (unexpected): %v", err)
-	} else {
-		t.Error("BUG: RGB values 999, -50, 1000 accepted - no bounds validation")
+	// ValidateCommand now checks RGB value ranges
+	if err := ValidateCommand(cmd); err == nil {
+		t.Error("expected error from out-of-bounds RGB component, but none occurred")
 	}
 
 	entity := &types.Entity{Data: types.EntityData{}}
 	store := Bind(entity)
-	store.SetDesiredFromCommand(cmd)
-
-	state, _ := store.Desired()
-	if len(state.RGB) == 3 && (state.RGB[0] == 999 || state.RGB[1] == -50) {
-		t.Error("BUG: Invalid RGB values were stored without validation")
+	err := store.SetDesiredFromCommand(cmd)
+	if err == nil {
+		t.Error("expected error from out-of-bounds RGB component in store, but none occurred")
 	}
 }
 
-// === BREAKING TEST: Empty Scene Name Accepted ===
-// This exposes that scene names aren't validated for meaningful content
-func TestEmptySceneValidation_Missing(t *testing.T) {
+// === BREAKING TEST: Empty Scene Name Rejected ===
+// This verifies that scene names are validated
+func TestEmptySceneValidation(t *testing.T) {
 	emptyScene := ""
 	cmd := Command{
 		Type:  ActionSetScene,
@@ -150,27 +135,15 @@ func TestEmptySceneValidation_Missing(t *testing.T) {
 
 	// ValidateCommand rejects empty scenes
 	if err := ValidateCommand(cmd); err == nil {
-		t.Error("BUG: Empty scene should be rejected by ValidateCommand")
+		t.Error("expected error from empty scene, but none occurred")
 	}
 
-	// But if someone bypasses validation...
 	entity := &types.Entity{Data: types.EntityData{}}
 	store := Bind(entity)
 
-	// This will panic in SetDesiredFromCommand due to nil check missing
-	// Actually, it won't panic because Scene is not nil, it's just empty
-	// Let's check what happens
-	defer func() {
-		if r := recover(); r != nil {
-			t.Logf("SetDesiredFromCommand panicked on empty scene (expected): %v", r)
-		}
-	}()
-
-	store.SetDesiredFromCommand(cmd)
-
-	state, _ := store.Desired()
-	if state.Scene == "" {
-		t.Error("BUG: Empty scene name was stored - no content validation")
+	err := store.SetDesiredFromCommand(cmd)
+	if err == nil {
+		t.Error("expected error from empty scene in store, but none occurred")
 	}
 }
 
@@ -284,8 +257,8 @@ func TestMultipleStoreBindings_RaceCondition(t *testing.T) {
 	store2 := Bind(entity)
 
 	// Both stores can modify the same entity
-	store1.SetBrightness(50)
-	store2.SetBrightness(75)
+	_ = store1.SetBrightness(50)
+	_ = store2.SetBrightness(75)
 
 	// Last write wins, but there's no coordination
 	state, _ := store1.Desired()
@@ -393,7 +366,7 @@ func TestEffectiveStateInconsistency(t *testing.T) {
 	store := Bind(entity)
 
 	// Modify reported state
-	store.SetReportedFromEvent(Event{Type: ActionTurnOff})
+	_ = store.SetReportedFromEvent(Event{Type: ActionTurnOff})
 
 	// Verify both are in sync
 	reported, _ := decodeState(entity.Data.Reported)
@@ -406,22 +379,22 @@ func TestEffectiveStateInconsistency(t *testing.T) {
 }
 
 // === BREAKING TEST: Invalid Action Type in Command ===
-// This exposes that unknown action types might not be handled gracefully
+// This verifies that unknown action types are rejected
 func TestInvalidActionType(t *testing.T) {
 	cmd := Command{Type: "invalid_action_type_12345"}
 
 	// ValidateCommand should reject this
 	if err := ValidateCommand(cmd); err == nil {
-		t.Error("BUG: Invalid action type should be rejected by ValidateCommand")
+		t.Error("expected error from invalid action type, but none occurred")
 	}
 
 	entity := &types.Entity{Data: types.EntityData{}}
 	store := Bind(entity)
 
-	// SetDesiredFromCommand silently ignores unknown action types
+	// SetDesiredFromCommand now returns error for unknown action types
 	err := store.SetDesiredFromCommand(cmd)
-	if err != nil {
-		t.Errorf("BUG: SetDesiredFromCommand should silently ignore unknown actions, but got error: %v", err)
+	if err == nil {
+		t.Error("expected error from unknown action in SetDesiredFromCommand, but none occurred")
 	}
 
 	// State should be unchanged
@@ -430,5 +403,5 @@ func TestInvalidActionType(t *testing.T) {
 		t.Error("BUG: Unknown action should not modify state, but power is now true")
 	}
 
-	t.Log("WARNING: Unknown action types are silently ignored - could mask typos or API mismatches")
+	t.Log("SUCCESS: Unknown action types are now explicitly rejected")
 }
